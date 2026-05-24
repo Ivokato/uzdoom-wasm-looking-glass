@@ -80,6 +80,12 @@ public:
 	virtual void ScreenSizeChanged() {}
 	virtual void Draw(int bottom, int visibility) {}
 
+	// Used by AttachMessage's id=0 dedup path to identify messages that share
+	// the same font and should not stack. Default nullptr — opt-out for any
+	// derived class that doesn't actually use an FFont (e.g. ZScript-only
+	// message types).
+	virtual FFont* GetFont() const { return nullptr; }
+
 	bool CallTick();	// Returns true to indicate time for removal
 	void CallScreenSizeChanged();
 	void CallDraw(int bottom, int visibility);
@@ -109,6 +115,7 @@ public:
 	virtual void DoDraw (int linenum, int x, int y, bool clean, int hudheight);
 	virtual bool Tick () override;
 	virtual void ScreenSizeChanged () override;
+	FFont* GetFont() const override { return Font; }
 
 	void SetVisibility(int vis)
 	{

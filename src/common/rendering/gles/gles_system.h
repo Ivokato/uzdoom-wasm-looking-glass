@@ -100,6 +100,7 @@ namespace OpenGLESRenderer
 		bool forceGLSLv100;
 		bool depthClampAvailable;
 		bool anistropicFilterAvailable;
+		bool es3VertexFeatures;
 		int glesMode;
 		const char* shaderVersionString;
 		int max_texturesize;

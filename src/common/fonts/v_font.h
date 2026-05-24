@@ -105,6 +105,13 @@ public:
 
 	virtual FGameTexture *GetChar (int code, int translation, int *const width) const;
 	virtual int GetCharWidth (int code) const;
+	// True for FSinglePicFont — a font that wraps one arbitrary graphic as
+	// the 'A' character (used by `setfont(picname)` from ACS when picname
+	// isn't a real font). HUD-message draws use this to opt out of the
+	// GLES2/WebGL2 STYLE_Translucent-at-alpha-1 workaround so that gradient-
+	// alpha "fake bars" textures (e.g. Brutal Doom's PAIN1) render with
+	// their intended translucency instead of being clamped to opaque.
+	virtual bool IsSinglePicFont() const { return false; }
 	FTranslationID GetColorTranslation (EColorRange range, PalEntry *color = nullptr) const;
 	int GetLump() const { return Lump; }
 	int GetSpaceWidth () const { return SpaceWidth; }

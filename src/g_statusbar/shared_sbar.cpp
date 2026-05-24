@@ -742,6 +742,49 @@ void DBaseStatusBar::CallTick()
 //
 //---------------------------------------------------------------------------
 
+// When an ACS hudmessage call uses an anonymous id (id=0 OR id=-1 which is
+// packed as 0xFFFFFFFF by p_acs.cpp's `id ? 0xff000000|id : 0` formula),
+// the engine appends the new message to the layer's linked list without
+// removing any prior message with the same content. Live tracing of
+// Brutal Doom v21 confirms its PAINEFFECT scripts call HudMessage with
+// id=0 for fonts "Pain1", "RBLD1", "RBLD2", and BREAK-family textures —
+// every damage tick fires these scripts.
+//
+// Some accumulation is intentional (it's how native UZDoom produces a
+// visible damage flash during sustained damage), but unbounded
+// accumulation saturates the alpha blend toward fully opaque. Side-by-
+// side videos vs native:
+//   - dedup ON (unlimited single replacement) → bars too subtle, max
+//     red ≈ 83 per message
+//   - dedup OFF (unbounded stacking)        → bars way too intense at
+//     sustained damage, half the screen turns solid red
+//   - native gameplay                       → peak red ≈ 210, suggests
+//     ~3-5 messages overlapping at any moment
+//
+// Implementation: this CVar now controls the *cap* on how many same-
+// font anonymous-id messages can coexist in a layer. AttachMessage
+// removes the oldest extras beyond the cap. 0 = unlimited (old "dedup
+// off"), 1 = single replacement (old "dedup on"), 3-5 ≈ native look.
+CUSTOM_CVARD(Int, hud_idzero_stack_cap, 4,
+	CVAR_ARCHIVE | CVAR_GLOBALCONFIG,
+	"Maximum number of anonymous-id (id=0 or id=-1) HUD messages with the "
+	"same font that may coexist in a layer. 0 = unlimited stacking, 1 = "
+	"single replacement, default 4 matches native UZDoom's natural "
+	"sustained-damage bar intensity for mods like Brutal Doom.")
+{
+	if (self < 0) self = 0;
+	if (self > 64) self = 64;
+}
+
+// Legacy boolean CVar kept declared so existing user configs don't error,
+// but it no longer has any effect — hud_idzero_stack_cap is the only knob.
+CUSTOM_CVARD(Bool, hud_dedup_idzero_messages, false,
+	CVAR_ARCHIVE | CVAR_GLOBALCONFIG,
+	"Deprecated: no longer used. Set hud_idzero_stack_cap instead "
+	"(0=unlimited, 1=single replacement).")
+{
+}
+
 void DBaseStatusBar::AttachMessage (DHUDMessageBase *msg, uint32_t id, int layer)
 {
 	DHUDMessageBase *old = NULL;
@@ -759,6 +802,48 @@ void DBaseStatusBar::AttachMessage (DHUDMessageBase *msg, uint32_t id, int layer
 	if ((size_t)layer >= countof(Messages))
 	{
 		layer = HUDMSGLayer_Default;
+	}
+
+	// Cap on same-font anonymous-id messages. See CVar comment above for
+	// rationale. cap == 0 means unlimited (no removal).
+	FFont *newFont = msg->GetFont();
+	int effectiveCap = hud_idzero_stack_cap;
+	if ((id == 0 || id == 0xFFFFFFFF) && effectiveCap > 0 && newFont != nullptr)
+	{
+		// Count existing same-font anonymous-id messages in this layer.
+		// If count + 1 (this new one) > cap, remove the oldest ones until
+		// we'd be at exactly (cap - 1) so that after attaching the new
+		// one we land at cap.
+		int count = 0;
+		for (DHUDMessageBase *p = Messages[layer]; p; p = p->Next)
+		{
+			if ((p->SBarID == 0 || p->SBarID == 0xFFFFFFFF) && p->GetFont() == newFont)
+			{
+				count++;
+			}
+		}
+		// Determine how many to remove (oldest first — they're at the
+		// HEAD of the list, since AttachMessage appends to the end via
+		// the sorted-insertion below).
+		int toRemove = (count + 1) - effectiveCap;
+		if (toRemove > 0)
+		{
+			TObjPtr<DHUDMessageBase *> *cur = &Messages[layer];
+			while (toRemove > 0 && (*cur).Get() != nullptr)
+			{
+				DHUDMessageBase *candidate = (*cur).Get();
+				if ((candidate->SBarID == 0 || candidate->SBarID == 0xFFFFFFFF) && candidate->GetFont() == newFont)
+				{
+					*cur = candidate->Next;
+					candidate->Destroy();
+					toRemove--;
+				}
+				else
+				{
+					cur = &candidate->Next;
+				}
+			}
+		}
 	}
 
 	pointing = this;

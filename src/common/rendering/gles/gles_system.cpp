@@ -208,6 +208,7 @@ namespace OpenGLESRenderer
 			gles.npotAvailable = CheckExtension("GL_OES_texture_npot");
 			gles.depthClampAvailable = CheckExtension("GL_EXT_depth_clamp");
 			gles.anistropicFilterAvailable = CheckExtension("GL_EXT_texture_filter_anisotropic");
+			gles.es3VertexFeatures = false;
 #ifdef __EMSCRIPTEN__
 			// WebGL2 has packed depth-stencil and NPOT textures as core features,
 			// but doesn't advertise the legacy OES extension strings. WebGL2
@@ -215,6 +216,10 @@ namespace OpenGLESRenderer
 			// the packed DEPTH24_STENCIL8 path.
 			gles.depthStencilAvailable = true;
 			gles.npotAvailable = true;
+			// WebGL2 = OpenGL ES 3.0 — has glVertexAttribIPointer and uniform-
+			// array bone uploads even though glesMode lands on GLES (the ES-
+			// 3.0-reporting version string matches the GLES-mode sniff above).
+			gles.es3VertexFeatures = true;
 #endif
 		}
 		else if (gles.glesMode == GLES_MODE_OGL2)
@@ -227,6 +232,7 @@ namespace OpenGLESRenderer
 			gles.useMappedBuffers = true;
 			gles.depthClampAvailable = true;
 			gles.anistropicFilterAvailable = true;
+			gles.es3VertexFeatures = false;
 		}
 		else if (gles.glesMode == GLES_MODE_OGL3)
 		{
@@ -238,6 +244,7 @@ namespace OpenGLESRenderer
 			gles.useMappedBuffers = true;
 			gles.depthClampAvailable = true;
 			gles.anistropicFilterAvailable = true;
+			gles.es3VertexFeatures = true;
 		}
 		
 		setGlVersion(glVersion);

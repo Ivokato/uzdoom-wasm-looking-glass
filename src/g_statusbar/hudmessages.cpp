@@ -44,6 +44,27 @@
 #include "vm.h"
 #include "c_console.h"
 #include "v_draw.h"
+#include "c_cvars.h"
+
+// User-facing CVar to suppress HUD messages that use a pic-font (i.e. a
+// graphic wrapped as a one-character font via ACS `setfont(picname)`).
+// These messages are how Brutal Doom (and similar mods) paint damage-
+// indicator overlays — PAIN1, XBREAK, RBLD1/2, BREAK1/2/S, PBUL*, etc.
+//
+// Default is OFF in this WASM build: side-by-side comparison vs native
+// UZDoom showed that the GLES2/WebGL backend renders these overlays
+// significantly more pronounced (covering large screen areas) than the
+// native build's subtle gradient bars. Until the underlying render
+// divergence is root-caused, we hide the overlays by default and the
+// engine's own V_DrawBlend damage flash (controlled by
+// blood_fade_scalar) provides the damage indicator. Set this CVar to
+// true to re-enable the overlays if you want the broken-but-loud BD
+// look back.
+CVARD(Bool, hud_picfont_messages, false,
+	CVAR_ARCHIVE | CVAR_GLOBALCONFIG,
+	"Show pic-font HUD overlay messages (e.g. Brutal Doom's PAIN1/"
+	"XBREAK/RBLD damage bars). Default off in WASM build because they "
+	"render more pronounced than native UZDoom; set true to re-enable.")
 
 IMPLEMENT_CLASS(DHUDMessageBase, false, true)
 IMPLEMENT_POINTERS_START(DHUDMessageBase)
@@ -475,6 +496,11 @@ void DHUDMessage::DrawSetup ()
 
 void DHUDMessage::DoDraw (int linenum, int x, int y, bool clean, int hudheight)
 {
+	// User opt-out for pic-font overlays (BD's PAIN1 etc.).
+	if (!hud_picfont_messages && Font && Font->IsSinglePicFont())
+	{
+		return;
+	}
 	// WASM workaround: C_MidPrint text renders semi-transparent in the
 	// GLES2/WebGL2 backend when DTA_RenderStyle = STYLE_Translucent is passed
 	// explicitly, even at Alpha == 1.0. Upstream intends STYLE_Translucent(α=1)
@@ -488,9 +514,24 @@ void DHUDMessage::DoDraw (int linenum, int x, int y, bool clean, int hudheight)
 	// Narrow workaround: only bypass when fully opaque, so fade variants
 	// (DHUDMessageFadeOut etc.) that transition through α<1 keep the explicit
 	// STYLE_Translucent path, which works correctly at non-unit alpha.
-	// Harmless on native GL/Vulkan backends. Remove once the GLES2-backend
-	// divergence is root-caused and fixed.
-	bool skipStyle = (Alpha >= 1.f);
+	//
+	// FSinglePicFont exception: ACS scripts that do `setfont(picname)` on a
+	// graphic (not a real font) wrap that graphic as a one-character font,
+	// and use HUDMSG_FADEOUT to draw it as a fading screen overlay. Brutal
+	// Doom uses this for its damage-indicator bars — PAIN1 has a low-alpha
+	// gradient (max α≈48/255) baked into its alpha channel. Routing pic-
+	// fonts through STYLE_Normal at α=1 effectively forces the texture to
+	// render OPAQUE (vertex α=1 dominates over the texture's per-pixel
+	// alpha), producing bright-flash bars that snap on/off and don't match
+	// native's smoother sustained-tint look. Native achieves the visible
+	// intensity by ACCUMULATING multiple Pain1 messages during sustained
+	// damage (see hud_dedup_idzero_messages CVar in shared_sbar.cpp —
+	// default off to allow that natural accumulation).
+	// Pic-fonts must take the STYLE_Translucent path so their texture-
+	// alpha gradient survives and they composite correctly when stacked.
+	//
+	// Harmless on native GL/Vulkan backends.
+	bool skipStyle = (Alpha >= 1.f && !(Font && Font->IsSinglePicFont()));
 	if (hudheight == 0)
 	{
 		int scale = active_con_scaletext(twod);
@@ -604,6 +645,11 @@ bool DHUDMessageFadeOut::Tick ()
 
 void DHUDMessageFadeOut::DoDraw (int linenum, int x, int y, bool clean, int hudheight)
 {
+	// User opt-out — same gate as the base class draw.
+	if (!hud_picfont_messages && Font && Font->IsSinglePicFont())
+	{
+		return;
+	}
 	if (State == 1)
 	{
 		DHUDMessage::DoDraw (linenum, x, y, clean, hudheight);
@@ -697,6 +743,11 @@ bool DHUDMessageFadeInOut::Tick ()
 
 void DHUDMessageFadeInOut::DoDraw (int linenum, int x, int y, bool clean, int hudheight)
 {
+	// User opt-out — same gate as DHUDMessage::DoDraw.
+	if (!hud_picfont_messages && Font && Font->IsSinglePicFont())
+	{
+		return;
+	}
 	if (State == 0)
 	{
 		float trans = float(Alpha * Tics / FadeInTics);

@@ -117,3 +117,12 @@ yarn-error.log
 *.log
 *.tmp
 last-run.*
+
+# ---------------------------------------------------------------------------
+# Local-only tests & investigation harnesses
+# ---------------------------------------------------------------------------
+# Per-session Puppeteer/PowerShell scripts and screenshot output used
+# while diagnosing rendering bugs (BD damage bars, etc.). These are
+# developer scratch space, not part of the shipping build, and pull in
+# Brutal Doom / DOOM2 WAD paths that are user-specific.
+/web/tests/

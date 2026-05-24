@@ -308,14 +308,20 @@ void GLVertexBuffer::Bind(int *offsets)
 		}
 		else
 		{
-			glEnableVertexAttribArray(i);
 			size_t ofs = offsets == nullptr ? attrinf.offset : attrinf.offset + mStride * offsets[attrinf.bindingpoint];
 			if (!attrinf.integerType)
+			{
+				glEnableVertexAttribArray(i);
 				glVertexAttribPointer(i, attrinf.size, attrinf.format, attrinf.normalize, (GLsizei)mStride, (void*)(intptr_t)ofs);
+			}
+			else if (gles.es3VertexFeatures)
+			{
+				glEnableVertexAttribArray(i);
+				glVertexAttribIPointer(i, attrinf.size, attrinf.format, (GLsizei)mStride, (void*)(intptr_t)ofs);
+			}
 			else
 			{
-				if (gles.glesMode >= GLES_MODE_OGL3)
-					glVertexAttribIPointer(i, attrinf.size, attrinf.format, (GLsizei)mStride, (void*)(intptr_t)ofs);
+				glDisableVertexAttribArray(i);
 			}
 		}
 		i++;
