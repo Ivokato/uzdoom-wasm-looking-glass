@@ -1,6 +1,7 @@
 # UZDoom WASM — Looking Glass multi-view fork
 
-Public corresponding source for the **Looking Glass Doom** portfolio project.
+Public corresponding source for the **Looking Glass Doom** portfolio project:
+https://github.com/Ivokato/uzdoom-wasm-looking-glass
 
 - Upstream: [abootnet/uzdoom-wasm](https://github.com/abootnet/uzdoom-wasm) (UZDoom / GPLv3)
 - Changes: `vr_mode 15` quilt cameras, sparse quality, GLES quilt pack, flat UI present path, `web/lg-swizzle.js`
