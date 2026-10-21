@@ -51,8 +51,12 @@
 #include "hwrenderer/scene/hw_clipper.h"
 #include "hwrenderer/scene/hw_portal.h"
 #include "hw_vrmodes.h"
+#include "menustate.h"
+#include "gamestate.h"
+#include "c_console.h"
 
 EXTERN_CVAR(Bool, cl_capfps)
+EXTERN_CVAR(Int, vr_mode)
 extern bool NoInterpolateView;
 
 static SWSceneDrawer *swdrawer;
@@ -134,7 +138,20 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 	// Render (potentially) multiple views for stereo 3d
 	// Fixme. The view offsetting should be done with a static table and not require setup of the entire render state for the mode.
 	auto vrmode = VRMode::GetVRMode(mainview && toscreen);
-	const int eyeCount = vrmode->mEyeCount;
+	int eyeCount = vrmode->mEyeCount;
+	// Looking Glass: menus / cutscenes / automap are flat panel UI — do not
+	// burn N eye renders that will be discarded. Keeps end-level / menu
+	// transitions responsive under WebGL proxying.
+	if (vr_mode == VR_LOOKINGGLASS && eyeCount > 1)
+	{
+		if (menuactive != MENU_Off
+			|| ConsoleState == c_down || ConsoleState == c_falling
+			|| automapactive
+			|| (gamestate != GS_LEVEL && gamestate != GS_TITLELEVEL))
+		{
+			eyeCount = 1;
+		}
+	}
 	screen->FirstEye();
 	for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 	{

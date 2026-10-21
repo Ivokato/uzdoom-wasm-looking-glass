@@ -232,12 +232,18 @@ namespace Priv
 			// the document viewport without firing `resize` on the loader's
 			// cached canvas.width) is handled correctly.
 			static auto syncCanvasSize = []() {
+				// Looking Glass: prefer panel drawable when in-context swizzle
+				// is armed; otherwise quilt size; otherwise CSS box.
 				int w = EM_ASM_INT({
+					if (Module.__lgPanelW > 0 && Module.__lgSwizzleReady) return Module.__lgPanelW | 0;
+					if (Module.__lgQuiltW > 0) return Module.__lgQuiltW | 0;
 					var c = Module.canvas || document.getElementById('canvas');
 					if (c && c.clientWidth) return c.clientWidth | 0;
 					return window.innerWidth | 0;
 				});
 				int h = EM_ASM_INT({
+					if (Module.__lgPanelH > 0 && Module.__lgSwizzleReady) return Module.__lgPanelH | 0;
+					if (Module.__lgQuiltH > 0) return Module.__lgQuiltH | 0;
 					var c = Module.canvas || document.getElementById('canvas');
 					if (c && c.clientHeight) return c.clientHeight | 0;
 					return window.innerHeight | 0;

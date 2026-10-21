@@ -1121,6 +1121,16 @@ void DBaseStatusBar::FlashCrosshair ()
 //
 //---------------------------------------------------------------------------
 
+bool DBaseStatusBar::HasHUDMessages() const
+{
+	for (int i = 0; i < NUM_HUDMSGLAYERS; ++i)
+	{
+		if (Messages[i] != nullptr)
+			return true;
+	}
+	return false;
+}
+
 void DBaseStatusBar::DrawMessages (int layer, int bottom)
 {
 	DHUDMessageBase *msg = Messages[layer];

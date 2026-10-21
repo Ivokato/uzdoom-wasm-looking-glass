@@ -28,8 +28,13 @@
 #include "gles_postprocessstate.h"
 #include "gles_shaderprogram.h"
 #include "gles_buffers.h"
+#include "sbar.h"
+#include "v_draw.h"
 
 #include <random>
+#include <algorithm>
+#include <cstdlib>
+#include <cmath>
 
 EXTERN_CVAR(Int, gl_debug_level)
 
@@ -56,8 +61,18 @@ namespace OpenGLESRenderer
 	FGLRenderBuffers::~FGLRenderBuffers()
 	{
 		ClearScene();
+		ClearQuilt();
 
 		DeleteTexture(mDitherTexture);
+	}
+
+	void FGLRenderBuffers::ClearQuilt()
+	{
+		DeleteFrameBuffer(mQuiltFB);
+		DeleteTexture(mQuiltTex);
+		mQuiltWidth = mQuiltHeight = 0;
+		mQuiltColumns = mQuiltRows = 0;
+		mQuiltTileW = mQuiltTileH = 0;
 	}
 
 	void FGLRenderBuffers::ClearScene()
@@ -445,7 +460,206 @@ namespace OpenGLESRenderer
 
 	bool FGLRenderBuffers::FailedCreate = false;
 
+	/** Real status-bar band in GL coords (y=0 at bottom), scaled to `height`.
+	 *  Portrait tiles make classic 32/200 far too tall — use StatusBar layout. */
+	static int LookingGlassHudBarHeight(int height)
+	{
+		if (height <= 1) return 1;
+		int barH = 0;
+		if (StatusBar)
+		{
+			const int top = StatusBar->GetTopOfStatusbar();
+			int refH = twod ? twod->GetHeight() : 0;
+			if (refH <= 0 && screen) refH = screen->GetHeight();
+			if (refH <= 0) refH = height;
+			if (top >= 0 && top < refH)
+			{
+				const int nativeBar = refH - top;
+				barH = std::max(1, (nativeBar * height + refH / 2) / refH);
+			}
+		}
+		if (barH <= 0)
+			barH = std::max(1, height * 32 / 200);
+		return std::min(barH, height - 1);
+	}
 
+	void FGLRenderBuffers::EnsureLookingGlassQuilt(int columns, int rows, int tileW, int tileH)
+	{
+		columns = std::max(1, columns);
+		rows = std::max(1, rows);
+		tileW = std::max(1, tileW);
+		tileH = std::max(1, tileH);
+		const int qw = columns * tileW;
+		const int qh = rows * tileH;
+		if (mQuiltFB && mQuiltWidth == qw && mQuiltHeight == qh
+			&& mQuiltColumns == columns && mQuiltRows == rows)
+			return;
 
+		ClearQuilt();
+		GLint activeTex;
+		GLint textureBinding;
+		glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTex);
+		glActiveTexture(GL_TEXTURE0);
+		glGetIntegerv(GL_TEXTURE_BINDING_2D, &textureBinding);
+
+		mQuiltTex = Create2DTexture("LookingGlassQuilt", GL_RGBA, qw, qh);
+		mQuiltFB = CreateFrameBuffer("LookingGlassQuiltFB", mQuiltTex);
+		mQuiltWidth = qw;
+		mQuiltHeight = qh;
+		mQuiltColumns = columns;
+		mQuiltRows = rows;
+		mQuiltTileW = tileW;
+		mQuiltTileH = tileH;
+
+		glBindTexture(GL_TEXTURE_2D, textureBinding);
+		glActiveTexture(activeTex);
+	}
+
+	void FGLRenderBuffers::ClearLookingGlassQuilt()
+	{
+		if (!mQuiltFB) return;
+		mQuiltFB.Bind();
+		glViewport(0, 0, mQuiltWidth, mQuiltHeight);
+		glClearColor(0.f, 0.f, 0.f, 1.f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		BindSceneFB(false);
+	}
+
+	void FGLRenderBuffers::BlitSceneToQuiltView(int viewIndex, int columns, int rows)
+	{
+		if (!mQuiltFB || !mSceneFB || columns < 1 || rows < 1) return;
+		const int col = viewIndex % columns;
+		const int rowFromBottom = viewIndex / columns;
+		if (rowFromBottom >= rows) return;
+		const int dx0 = col * mQuiltTileW;
+		const int dy0 = rowFromBottom * mQuiltTileH;
+
+		// Keep the classic status-bar band out of multi-view blits. Stretching the
+		// full scene (including the bar) into the tile puts weapon/floor pixels in
+		// the HUD zone; OverlayHudStrip then replaces that zone with flat 2D from
+		// the last eye → horizontal tear through the hand.
+		const int srcBarH = LookingGlassHudBarHeight(mSceneHeight);
+		const int dstBarH = LookingGlassHudBarHeight(mQuiltTileH);
+		if (srcBarH >= mSceneHeight || dstBarH >= mQuiltTileH) return;
+
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, mSceneFB.handle);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mQuiltFB.handle);
+		glBlitFramebuffer(
+			0, srcBarH, mSceneWidth, mSceneHeight,
+			dx0, dy0 + dstBarH, dx0 + mQuiltTileW, dy0 + mQuiltTileH,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		BindSceneFB(false);
+	}
+
+	void FGLRenderBuffers::OverlaySceneOnAllLookingGlassTiles()
+	{
+		if (!mQuiltFB || !mSceneFB || mQuiltColumns < 1 || mQuiltRows < 1) return;
+		// Menus/console: flat full-frame onto every tile (include HUD band).
+		const int total = mQuiltColumns * mQuiltRows;
+		for (int view = 0; view < total; ++view)
+		{
+			const int col = view % mQuiltColumns;
+			const int rowFromBottom = view / mQuiltColumns;
+			const int dx0 = col * mQuiltTileW;
+			const int dy0 = rowFromBottom * mQuiltTileH;
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, mSceneFB.handle);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mQuiltFB.handle);
+			glBlitFramebuffer(
+				0, 0, mSceneWidth, mSceneHeight,
+				dx0, dy0, dx0 + mQuiltTileW, dy0 + mQuiltTileH,
+				GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+		BindSceneFB(false);
+	}
+
+	void FGLRenderBuffers::OverlayHudStripOnLookingGlassTiles()
+	{
+		if (!mQuiltFB || !mSceneFB || mQuiltColumns < 1 || mQuiltRows < 1) return;
+		if (mSceneWidth <= 0 || mSceneHeight <= 0) return;
+
+		const int barH = LookingGlassHudBarHeight(mSceneHeight);
+		const int destBarH = LookingGlassHudBarHeight(mQuiltTileH);
+		const int total = mQuiltColumns * mQuiltRows;
+		for (int view = 0; view < total; ++view)
+		{
+			const int col = view % mQuiltColumns;
+			const int rowFromBottom = view / mQuiltColumns;
+			const int dx0 = col * mQuiltTileW;
+			const int dy0 = rowFromBottom * mQuiltTileH;
+
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, mSceneFB.handle);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mQuiltFB.handle);
+			glBlitFramebuffer(
+				0, 0, mSceneWidth, barH,
+				dx0, dy0, dx0 + mQuiltTileW, dy0 + destBarH,
+				GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+		BindSceneFB(false);
+	}
+
+	void FGLRenderBuffers::BlitLookingGlassSceneToPanel(int panelW, int panelH)
+	{
+		if (!mSceneFB || mSceneWidth < 1 || mSceneHeight < 1) return;
+		panelW = std::max(1, panelW);
+		panelH = std::max(1, panelH);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, mSceneFB.handle);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+		glViewport(0, 0, panelW, panelH);
+		glBlitFramebuffer(
+			0, 0, mSceneWidth, mSceneHeight,
+			0, 0, panelW, panelH,
+			GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		BindSceneFB(false);
+	}
+
+	void FGLRenderBuffers::NearestFillLookingGlassQuilt(const int *renderedViews, int renderedCount, int columns, int rows)
+	{
+		// WebGL2 forbids (or no-ops) blitting within the same FBO. Route each
+		// copy through the scene color buffer as a scratch target — safe here
+		// because nearest-fill runs after the last eye has already been
+		// captured into the quilt.
+		if (!mQuiltFB || !mSceneFB || !renderedViews || renderedCount <= 0) return;
+		const int total = columns * rows;
+		const int tw = mQuiltTileW;
+		const int th = mQuiltTileH;
+		for (int view = 0; view < total; ++view)
+		{
+			int best = renderedViews[0];
+			int bestDist = abs(view - best);
+			bool isRendered = false;
+			for (int i = 0; i < renderedCount; ++i)
+			{
+				if (renderedViews[i] == view) { isRendered = true; break; }
+				const int d = abs(view - renderedViews[i]);
+				if (d < bestDist) { best = renderedViews[i]; bestDist = d; }
+			}
+			if (isRendered || best == view) continue;
+
+			const int sx0 = (best % columns) * tw;
+			const int sy0 = (best / columns) * th;
+			const int dx0 = (view % columns) * tw;
+			const int dy0 = (view / columns) * th;
+
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, mQuiltFB.handle);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mSceneFB.handle);
+			glBlitFramebuffer(
+				sx0, sy0, sx0 + tw, sy0 + th,
+				0, 0, tw, th,
+				GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, mSceneFB.handle);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mQuiltFB.handle);
+			glBlitFramebuffer(
+				0, 0, tw, th,
+				dx0, dy0, dx0 + tw, dy0 + th,
+				GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+		BindSceneFB(false);
+	}
+
+	void FGLRenderBuffers::BindLookingGlassQuiltTexture(int index, int filter, int wrap)
+	{
+		mQuiltTex.Bind(index, filter, wrap);
+	}
 
 }  // namespace OpenGLRenderer

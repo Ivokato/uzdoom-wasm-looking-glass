@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "hwrenderer/postprocessing/hw_postprocess.h"
@@ -105,6 +104,27 @@ public:
 
 	void BindDitherTexture(int texunit);
 
+	/** Looking Glass: ensure quilt FBO, clear, blit scene→tile, bind quilt for present. */
+	void EnsureLookingGlassQuilt(int columns, int rows, int tileW, int tileH);
+	void ClearLookingGlassQuilt();
+	/** 1:1 (or uniform scale) scene → quilt tile. Scene must match tile aspect. */
+	void BlitSceneToQuiltView(int viewIndex, int columns, int rows);
+	void NearestFillLookingGlassQuilt(const int *renderedViews, int renderedCount, int columns, int rows);
+	/** Stamp full scene (menus/console) onto every tile — flat UI. */
+	void OverlaySceneOnAllLookingGlassTiles();
+	/** Copy classic status-bar strip onto every tile (zero-parallax HUD). */
+	void OverlayHudStripOnLookingGlassTiles();
+	void BlitLookingGlassSceneToPanel(int panelW, int panelH);
+	void BindLookingGlassQuiltTexture(int index, int filter = GL_LINEAR, int wrap = GL_CLAMP_TO_EDGE);
+	bool HasLookingGlassQuilt() const { return mQuiltFB.handle != 0; }
+	GLuint GetLookingGlassQuiltTextureName() const { return mQuiltTex.handle; }
+	int GetQuiltWidth() const { return mQuiltWidth; }
+	int GetQuiltHeight() const { return mQuiltHeight; }
+	int GetQuiltColumns() const { return mQuiltColumns; }
+	int GetQuiltRows() const { return mQuiltRows; }
+	int GetQuiltTileW() const { return mQuiltTileW; }
+	int GetQuiltTileH() const { return mQuiltTileH; }
+
 	int GetWidth() const { return mWidth; }
 	int GetHeight() const { return mHeight; }
 
@@ -113,6 +133,7 @@ public:
 
 private:
 	void ClearScene();
+	void ClearQuilt();
 
 	void CreateScene(int width, int height);
 	void CreatePipeline(int width, int height);
@@ -143,6 +164,16 @@ private:
 	bool mSceneUsesTextures = false;
 
 	PPGLTexture mDitherTexture;
+
+	// Looking Glass quilt (packed N-view color target)
+	PPGLTexture mQuiltTex;
+	PPGLFrameBuffer mQuiltFB;
+	int mQuiltWidth = 0;
+	int mQuiltHeight = 0;
+	int mQuiltColumns = 0;
+	int mQuiltRows = 0;
+	int mQuiltTileW = 0;
+	int mQuiltTileH = 0;
 
 	static bool FailedCreate;
 

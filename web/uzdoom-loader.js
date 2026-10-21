@@ -151,6 +151,31 @@
     if (params.get('fast')       === '1') out.argv.push('-fast');
     if (params.get('respawn')    === '1') out.argv.push('-respawn');
 
+    // Looking Glass multi-view quilt (custom fork): ?lg=1&lgq=24&lgres=512&lgcols=8&lgrows=6
+    if (params.get('lg') === '1') {
+      out.argv.push('+vr_mode', '15');
+      const q = params.get('lgq');
+      if (q && /^\d{1,2}$/.test(q)) out.argv.push('+vr_lg_quality', q);
+      const cols = params.get('lgcols');
+      if (cols && /^\d{1,2}$/.test(cols)) out.argv.push('+vr_lg_columns', cols);
+      const rows = params.get('lgrows');
+      if (rows && /^\d{1,2}$/.test(rows)) out.argv.push('+vr_lg_rows', rows);
+      const cone = params.get('lgcone');
+      if (cone && /^\d{1,3}(?:\.\d{1,2})?$/.test(cone)) out.argv.push('+vr_lg_viewcone', cone);
+      const cam = params.get('lgcam');
+      if (cam && /^\d{1,2}(?:\.\d{1,3})?$/.test(cam)) out.argv.push('+vr_lg_camdist', cam);
+      const sw = params.get('lgsw');
+      if (sw && /^\d{3,5}$/.test(sw)) out.argv.push('+vr_lg_screen_w', sw);
+      const sh = params.get('lgsh');
+      if (sh && /^\d{3,5}$/.test(sh)) out.argv.push('+vr_lg_screen_h', sh);
+      const tw = params.get('lgtw');
+      if (tw && /^\d{2,4}$/.test(tw)) out.argv.push('+vr_lg_tile_w', tw);
+      const th = params.get('lgth');
+      if (th && /^\d{2,4}$/.test(th)) out.argv.push('+vr_lg_tile_h', th);
+      const res = params.get('lgres');
+      if (res && /^\d{3,4}$/.test(res)) out.argv.push('+vr_lg_long_edge', res);
+    }
+
     const cheat = params.get('cheat');
     if (cheat && RE_CHEAT_LIST.test(cheat)) {
       for (const c of cheat.toLowerCase().split(',')) {

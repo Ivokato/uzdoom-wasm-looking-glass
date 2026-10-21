@@ -39,6 +39,10 @@
 
 #include "i_time.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include "gles_framebuffer.h"
 #include "gles_renderer.h"
 #include "gles_samplers.h"
@@ -59,11 +63,23 @@
 
 #include "flatvertices.h"
 #include "hw_cvars.h"
+#include "v_video.h"
+#include "r_utility.h"
+#include <algorithm>
+#include <cmath>
 
 EXTERN_CVAR (Bool, vid_vsync)
 EXTERN_CVAR(Int, gl_tonemap)
 EXTERN_CVAR(Bool, cl_capfps)
 EXTERN_CVAR(Int, gl_pipeline_depth);
+EXTERN_CVAR(Int, vr_mode);
+EXTERN_CVAR(Int, vr_lg_tile_w);
+EXTERN_CVAR(Int, vr_lg_tile_h);
+EXTERN_CVAR(Int, vr_lg_screen_w);
+EXTERN_CVAR(Int, vr_lg_screen_h);
+EXTERN_CVAR(Int, vr_lg_long_edge);
+EXTERN_CVAR(Int, vr_lg_columns);
+EXTERN_CVAR(Int, vr_lg_rows);
 
 EXTERN_CVAR(Bool, gl_sort_textures);
 
@@ -72,6 +88,117 @@ extern bool vid_hdr_active;
 namespace OpenGLESRenderer
 {
 	FGLRenderer *GLRenderer;
+
+namespace
+{
+	int NearestPow2(int v)
+	{
+		v = std::max(64, v);
+		int p = 64;
+		while (p < v) p <<= 1;
+		const int prev = p >> 1;
+		return (p - v < v - prev) ? p : std::max(64, prev);
+	}
+
+	int LookingGlassMaxTexSize()
+	{
+		GLint maxTex = 4096;
+		glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTex);
+		return std::max(512, (int)maxTex);
+	}
+
+	/** Panel-aspect tile size. Long edge → nearest power-of-two; short edge from aspect (even).
+	 *  Clamped so columns×tileW and rows×tileH fit in GL_MAX_TEXTURE_SIZE. */
+	void CalcLookingGlassTileSize(int &tileW, int &tileH)
+	{
+		if (vr_lg_tile_w > 0 && vr_lg_tile_h > 0)
+		{
+			tileW = std::max(64, (int)vr_lg_tile_w);
+			tileH = std::max(64, (int)vr_lg_tile_h);
+		}
+		else
+		{
+			const int sw = std::max(1, (int)vr_lg_screen_w);
+			const int sh = std::max(1, (int)vr_lg_screen_h);
+			const float aspect = (float)sw / (float)sh;
+			const int targetLong = std::clamp((int)vr_lg_long_edge, 128, 1024);
+			if (aspect < 1.f)
+			{
+				tileH = NearestPow2(targetLong);
+				tileW = std::max(64, (int)std::lround(tileH * aspect));
+				tileW &= ~1;
+			}
+			else
+			{
+				tileW = NearestPow2(targetLong);
+				tileH = std::max(64, (int)std::lround(tileW / aspect));
+				tileH &= ~1;
+			}
+		}
+
+		const int cols = std::clamp((int)vr_lg_columns, 1, 16);
+		const int rows = std::clamp((int)vr_lg_rows, 1, 16);
+		const int maxTex = LookingGlassMaxTexSize();
+		const int maxTW = std::max(64, maxTex / cols);
+		const int maxTH = std::max(64, maxTex / rows);
+		if (tileW > maxTW || tileH > maxTH)
+		{
+			const float s = std::min((float)maxTW / (float)tileW, (float)maxTH / (float)tileH);
+			tileW = std::max(64, (int)std::lround(tileW * s)) & ~1;
+			tileH = std::max(64, (int)std::lround(tileH * s)) & ~1;
+		}
+	}
+
+	/** Drive game res from tile size. Drawable is panel-sized when in-context
+	 *  swizzle is active (quilt stays in an FBO — no full-quilt canvas). */
+	void ApplyLookingGlassVirtualRes(OpenGLFrameBuffer *fb)
+	{
+		int tileW = 0, tileH = 0;
+		CalcLookingGlassTileSize(tileW, tileH);
+		if (fb->GetWidth() != tileW || fb->GetHeight() != tileH)
+		{
+			fb->SetVirtualSize(tileW, tileH);
+			V_OutputResized(tileW, tileH);
+			if (fb->mVertexData)
+				fb->mVertexData->OutputResized(tileW, tileH);
+			setsizeneeded = true;
+		}
+
+		fb->SetViewportRects(nullptr);
+		// Ignore gl_scale_viewport — scene must stay at tile resolution.
+		fb->mScreenViewport.left = 0;
+		fb->mScreenViewport.top = 0;
+		fb->mScreenViewport.width = tileW;
+		fb->mScreenViewport.height = tileH;
+		fb->mSceneViewport = fb->mScreenViewport;
+		fb->mGameScreenWidth = tileW;
+		fb->mGameScreenHeight = tileH;
+
+#ifdef __EMSCRIPTEN__
+		// Drawable is always panel-sized in LG mode. Resizing canvas after the
+		// WebGL context exists destroys it — never flip quilt↔panel at runtime.
+		const int panelW = std::max(64, (int)vr_lg_screen_w);
+		const int panelH = std::max(64, (int)vr_lg_screen_h);
+		EM_ASM_({
+			Module.__lgPanelW = $0;
+			Module.__lgPanelH = $1;
+			var c = Module.canvas || document.getElementById('canvas');
+			if (!c) return;
+			if (c.width === $0 && c.height === $1) return;
+			var live = !!(Module.ctx || (typeof GL !== 'undefined' && GL.currentContext));
+			if (live) {
+				if (!Module.__lgCanvasResizeWarned) {
+					Module.__lgCanvasResizeWarned = 1;
+					console.warn('[lg] skip canvas resize (preserves GL)', c.width + 'x' + c.height, '->', $0 + 'x' + $1);
+				}
+				return;
+			}
+			c.width = $0;
+			c.height = $1;
+		}, panelW, panelH);
+#endif
+	}
+}
 
 //==========================================================================
 //
@@ -178,7 +305,14 @@ void OpenGLFrameBuffer::Update()
 	Flush3D.Unclock();
 
 	Swap();
-	Super::Update();
+	if (vr_mode == VR_LOOKINGGLASS)
+	{
+		ApplyLookingGlassVirtualRes(this);
+	}
+	else
+	{
+		Super::Update();
+	}
 }
 
 void OpenGLFrameBuffer::CopyScreenToBuffer(int width, int height, uint8_t* scr)
@@ -340,12 +474,41 @@ FRenderState* OpenGLFrameBuffer::RenderState()
 
 void OpenGLFrameBuffer::FirstEye()
 {
-	//GLRenderer->mBuffers->CurrentEye() = 0;  // always begin at zero, in case eye count changed
+	mLgCurrentEye = 0;
+	LookingGlassBeginFrame();
 }
 
 void OpenGLFrameBuffer::NextEye(int eyecount)
 {
-	//GLRenderer->mBuffers->NextEye(eyecount);
+	LookingGlassBlitCurrentEye();
+	mLgCurrentEye = (mLgCurrentEye + 1) % std::max(1, eyecount);
+}
+
+void OpenGLFrameBuffer::LookingGlassBeginFrame()
+{
+	auto vrmode = VRMode::GetVRMode(true);
+	if (vr_mode != VR_LOOKINGGLASS || !GLRenderer || !GLRenderer->mBuffers)
+		return;
+
+	const int cols = std::max(1, vrmode->mQuiltColumns);
+	const int rows = std::max(1, vrmode->mQuiltRows);
+	int tileW = 0, tileH = 0;
+	CalcLookingGlassTileSize(tileW, tileH);
+	GLRenderer->mBuffers->EnsureLookingGlassQuilt(cols, rows, tileW, tileH);
+	GLRenderer->mBuffers->ClearLookingGlassQuilt();
+}
+
+void OpenGLFrameBuffer::LookingGlassBlitCurrentEye()
+{
+	auto vrmode = VRMode::GetVRMode(true);
+	if (vr_mode != VR_LOOKINGGLASS || !GLRenderer || !GLRenderer->mBuffers)
+		return;
+	if (mLgCurrentEye < 0 || mLgCurrentEye >= vrmode->mEyeCount)
+		return;
+
+	const int viewIndex = vrmode->mQuiltIndices[mLgCurrentEye];
+	GLRenderer->mBuffers->BlitSceneToQuiltView(
+		viewIndex, vrmode->mQuiltColumns, vrmode->mQuiltRows);
 }
 
 void OpenGLFrameBuffer::SetSceneRenderTarget(bool useSSAO)
@@ -371,7 +534,18 @@ void OpenGLFrameBuffer::WaitForCommands(bool finish)
 
 void OpenGLFrameBuffer::BeginFrame()
 {
-	SetViewportRects(nullptr);
+	// Native panel aspect: drive virtual resolution from LG tile size so FOV
+	// projection matches the viewport (same horizontal FOV, taller vertical).
+	// Also size the WebGL drawable to the full quilt so present keeps sharpness.
+	if (vr_mode == VR_LOOKINGGLASS)
+	{
+		ApplyLookingGlassVirtualRes(this);
+	}
+	else
+	{
+		SetViewportRects(nullptr);
+	}
+
 	mViewpoints->Clear();
 	if (GLRenderer != nullptr)
 		GLRenderer->BeginFrame();

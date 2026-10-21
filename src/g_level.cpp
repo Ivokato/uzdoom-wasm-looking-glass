@@ -1081,22 +1081,27 @@ void RunIntermission(level_info_t* fromMap, level_info_t* toMap, DIntermissionCo
 
 	if (!ScreenJobValidate())
 	{
+		Printf(PRINT_HIGH, "[lg-hang] ScreenJobValidate failed — skipping cutscene\n");
 		DeleteScreenJob();
 		if (cutscene.completion) cutscene.completion(false);
 		cutscene.completion = nullptr;
 		return;
 	}
+	Printf(PRINT_HIGH, "[lg-hang] ScreenJobValidate ok → ga_intermission\n");
 	gameaction = ga_intermission;
 }
 
 void G_DoCompleted (void)
 {
+	Printf(PRINT_HIGH, "[lg-hang] G_DoCompleted enter gs=%d next=%s\n",
+		(int)gamestate, nextlevel.GetChars());
 	gameaction = ga_nothing;
 	
 	if (   gamestate == GS_DEMOSCREEN
 		|| gamestate == GS_FULLCONSOLE
 		|| gamestate == GS_STARTUP)
 	{
+		Printf(PRINT_HIGH, "[lg-hang] G_DoCompleted early-out (boot/demo)\n");
 		return;
 	}
 	
@@ -1114,6 +1119,7 @@ void G_DoCompleted (void)
 	P_FreeStrifeConversations ();
 
 	bool playinter = primaryLevel->DoCompleted(nextlevel, staticWmInfo);
+	Printf(PRINT_HIGH, "[lg-hang] DoCompleted playinter=%d\n", playinter ? 1 : 0);
 	S_StopAllChannels();
 	for (auto Level : AllLevels())
 	{
@@ -1129,16 +1135,21 @@ void G_DoCompleted (void)
 		//	if (statcopy)
 		//		memcpy (statcopy, &wminfo, sizeof(wminfo));
 		
+		Printf(PRINT_HIGH, "[lg-hang] WI_Start…\n");
 		statusScreen = WI_Start (&staticWmInfo);
+		Printf(PRINT_HIGH, "[lg-hang] WI_Start done\n");
 	}
 	bool endgame = strncmp(nextlevel.GetChars(), "enDSeQ", 6) == 0;
 	intermissionScreen = primaryLevel->CreateIntermission();
 	auto nextinfo = !playinter || endgame? nullptr : FindLevelInfo(nextlevel.GetChars(), false);
+	Printf(PRINT_HIGH, "[lg-hang] RunIntermission… endgame=%d\n", endgame ? 1 : 0);
 	RunIntermission(primaryLevel->info, nextinfo, intermissionScreen, statusScreen, [=](bool)
 	{
+		Printf(PRINT_HIGH, "[lg-hang] intermission completion endgame=%d\n", endgame ? 1 : 0);
 		if (!endgame) primaryLevel->WorldDone();
 		else D_StartTitle();
 	});
+	Printf(PRINT_HIGH, "[lg-hang] G_DoCompleted leave (gameaction=%d)\n", (int)gameaction);
 }
 
 //==========================================================================

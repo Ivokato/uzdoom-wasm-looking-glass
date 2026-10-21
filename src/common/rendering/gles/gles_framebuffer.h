@@ -66,6 +66,11 @@ public:
     FTexture *WipeEndScreen() override;
 
 	int camtexcount = 0;
+
+	/** Looking Glass eye index for quilt packing (GLES). */
+	int mLgCurrentEye = 0;
+	void LookingGlassBlitCurrentEye();
+	void LookingGlassBeginFrame();
 };
 
 }

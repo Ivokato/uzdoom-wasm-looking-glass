@@ -42,6 +42,7 @@
 #include "v_draw.h"
 #include "s_soundinternal.h"
 #include "i_time.h"
+#include "printf.h"
 
 EXTERN_CVAR(Bool, cl_capfps)
 
@@ -521,6 +522,7 @@ void PerformWipe(FTexture* startimg, FTexture* endimg, int wipe_type, bool stops
 	double diff_frac;
 	bool done;
 
+	Printf(PRINT_HIGH, "[lg-hang] PerformWipe enter type=%d\n", wipe_type);
 	GSnd->SetSfxPaused(true, 1);
 	I_FreezeTime(true);
 	twod->End();

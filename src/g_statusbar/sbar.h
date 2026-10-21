@@ -451,6 +451,9 @@ public:
 
 	FMugShot mugshot;
 
+	/** True when any DHUDMessage (pickup text, etc.) is attached. */
+	bool HasHUDMessages() const;
+
 private:
 	bool RepositionCoords (int &x, int &y, int xo, int yo, const int w, const int h) const;
 	void DrawMessages (int layer, int bottom);

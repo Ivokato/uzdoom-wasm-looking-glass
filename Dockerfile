@@ -101,6 +101,7 @@ RUN mkdir -p /stage/soundfonts /stage/fm_banks \
  && cp /src/build-wasm/uzdoom.data              /stage/uzdoom.data \
  && cp /src/build-wasm/uzdoom-loader.js         /stage/uzdoom-loader.js \
  && cp /src/build-wasm/uzdoom-melt.js           /stage/uzdoom-melt.js \
+ && (cp /src/build-wasm/lg-swizzle.js           /stage/lg-swizzle.js 2>/dev/null || cp /src/web/lg-swizzle.js /stage/lg-swizzle.js) \
  && cp /src/build-wasm/uzdoom.pk3               /stage/ \
  && cp /src/build-wasm/game_support.pk3         /stage/ \
  && cp /src/build-wasm/brightmaps.pk3           /stage/ \
@@ -110,7 +111,12 @@ RUN mkdir -p /stage/soundfonts /stage/fm_banks \
  && cp /src/build-wasm/fm_banks/*.wopl          /stage/fm_banks/ 2>/dev/null || true \
  && cp /src/build-wasm/fm_banks/*.wopn          /stage/fm_banks/ 2>/dev/null || true \
  && echo "=== /stage contents ===" \
- && ls -laR /stage
+ && ls -laR /stage \
+ && if [ -f /stage/index.html ] && [ -f /stage/lg-swizzle.js ]; then \
+      sed -i 's|src=uzdoom-loader.js|src=lg-swizzle.js></script><script src=uzdoom-loader.js|' /stage/index.html \
+      || sed -i 's|src="uzdoom-loader.js"|src="lg-swizzle.js"></script><script src="uzdoom-loader.js"|' /stage/index.html \
+      || true; \
+    fi
 
 # --- Runtime stage ---------------------------------------------------------
 FROM caddy:2-alpine
